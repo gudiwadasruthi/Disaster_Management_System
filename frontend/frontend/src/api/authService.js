@@ -1,5 +1,7 @@
 import axios from 'axios';
 
+import { reverseGeocode } from './geocodeService';
+
 const apiBase = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 const normalizeRole = (role) => String(role || '').toLowerCase();
@@ -116,9 +118,27 @@ export const logoutUser = async () => {
 };
 
 export const getMockGpsLocation = async () => {
+  const position = await new Promise((resolve, reject) => {
+    if (!navigator?.geolocation) {
+      reject(new Error('Geolocation is not supported'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    });
+  });
+
+  const latitude = position?.coords?.latitude;
+  const longitude = position?.coords?.longitude;
+
+  const geo = await reverseGeocode(latitude, longitude);
+
   return {
-    latitude: 19.076 + (Math.random() - 0.5) * 0.1,
-    longitude: 72.877 + (Math.random() - 0.5) * 0.1,
-    address: 'Mock Location, Mumbai, Maharashtra',
+    latitude,
+    longitude,
+    address: geo?.displayName || '',
   };
 };

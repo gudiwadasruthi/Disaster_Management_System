@@ -1,5 +1,52 @@
 import axiosInstance from './axiosInstance';
 
+const mapBackendStatusToUi = (status) => {
+  const s = String(status || '').toUpperCase();
+  if (s === 'REPORTED' || s === 'VERIFIED') return 'pending';
+  if (s === 'IN_PROGRESS') return 'active';
+  if (s === 'RESOLVED') return 'resolved';
+  if (s === 'ARCHIVED') return 'closed';
+  return 'pending';
+};
+
+const mapIncidentFromBackend = (inc) => {
+  const latitude = inc?.latitude ?? 0;
+  const longitude = inc?.longitude ?? 0;
+
+  return {
+    id: String(inc?.id ?? ''),
+    title: inc?.title ?? '',
+    description: inc?.description ?? '',
+    status: mapBackendStatusToUi(inc?.status),
+    created_at: inc?.created_at,
+    latitude,
+    longitude,
+    severity: inc?.severity || 'medium',
+    type: inc?.type || 'Other',
+    location: {
+      lat: latitude,
+      lng: longitude,
+      address: `(${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)})`,
+    },
+    reported_by: { id: String(inc?.reported_by ?? ''), name: inc?.reported_by_name || '', role: '' },
+    assigned_volunteer: null,
+    images: [],
+    updated_at: inc?.created_at,
+    upvotes: 0,
+    comments: 0,
+  };
+};
+
+const resolveVolunteerId = async (userOrVolunteerId) => {
+  if (!userOrVolunteerId) return null;
+
+  // Map User.id -> Volunteer.id (preferred). If not found, assume it's already a volunteer id.
+  const response = await axiosInstance.get('/volunteers/', { params: { page: 1, limit: 100 } });
+  const data = Array.isArray(response) ? response : (response.items || response.data || []);
+  const volunteer = data.find((v) => String(v.user_id) === String(userOrVolunteerId));
+  return volunteer?.id || userOrVolunteerId;
+};
+
 export const SKILLS = [
   'First Aid',
   'Medical Support',
@@ -93,23 +140,50 @@ export const updateVolunteerProfile = async (id, updates) => {
 
 export const getMyAssignments = async (volunteerId) => {
   try {
-    const response = await axiosInstance.get(`/assignments/volunteer/${volunteerId}`);
+    const resolvedVolunteerId = await resolveVolunteerId(volunteerId);
+    const response = await axiosInstance.get(`/assignments/volunteer/${resolvedVolunteerId}`);
     const events = Array.isArray(response) ? response : (response?.data || []);
 
     const incidentsRes = await axiosInstance.get('/incidents/', { params: { limit: 100 } });
     const incidents = incidentsRes?.items || incidentsRes?.data || incidentsRes || [];
 
-    const augmentedEvents = events.map(event => {
+    // Keep only the latest event per incident so UI doesn't show both ASSIGNED and RELEASED.
+    const byIncident = new Map();
+    for (const e of events) {
+      const key = String(e?.incident_id ?? '');
+      if (!key) continue;
+      const prev = byIncident.get(key);
+      const prevTs = prev?.timestamp ? new Date(prev.timestamp).getTime() : -1;
+      const nextTs = e?.timestamp ? new Date(e.timestamp).getTime() : -1;
+      if (!prev || nextTs >= prevTs) byIncident.set(key, e);
+    }
+
+    const latestEvents = Array.from(byIncident.values());
+
+    const augmentedEvents = latestEvents.map((event) => {
       const inc = Array.isArray(incidents) ? incidents.find(i => String(i.id) === String(event.incident_id)) : null;
+      const latitude = inc?.latitude;
+      const longitude = inc?.longitude;
+      const coordAddress = (latitude != null && longitude != null)
+        ? `(${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)})`
+        : 'Location unavailable';
+
+      const status = event.action === 'ASSIGNED' ? 'in_progress' : 'completed';
+      const ts = event.timestamp ? new Date(event.timestamp).toISOString() : '';
       return {
         ...event,
+        id: event.id || `${event.incident_id}-${event.action}-${ts}`,
         incident_title: inc ? inc.title : `Incident #${event.incident_id}`,
-        status: event.action === 'ASSIGNED' ? 'in_progress' : 'completed',
-        location: inc?.location?.address || inc?.city || 'Location unavailable',
-        assigned_at: event.timestamp
+        incident_severity: inc?.severity || 'medium',
+        status,
+        location: coordAddress,
+        assigned_at: event.timestamp,
+        completed_at: event.action === 'RELEASED' ? event.timestamp : null,
       };
     });
 
+    // Sort newest first
+    augmentedEvents.sort((a, b) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime());
     return augmentedEvents;
   } catch (error) {
     console.error('getMyAssignments error:', error);
@@ -119,7 +193,8 @@ export const getMyAssignments = async (volunteerId) => {
 
 export const acceptIncident = async (incidentId, volunteerId) => {
   try {
-    const response = await axiosInstance.put(`/volunteers/${volunteerId}/assign/${incidentId}`);
+    const resolvedVolunteerId = await resolveVolunteerId(volunteerId);
+    const response = await axiosInstance.put(`/volunteers/${resolvedVolunteerId}/assign/${incidentId}`);
     return response;
   } catch (error) {
     console.error('acceptIncident error:', error);
@@ -127,10 +202,11 @@ export const acceptIncident = async (incidentId, volunteerId) => {
   }
 };
 
-export const completeAssignment = async (assignmentId, incidentId, volunteerId) => {
+export const completeAssignment = async (incidentId, volunteerId) => {
   try {
+    const resolvedVolunteerId = await resolveVolunteerId(volunteerId);
     // Release volunteer from the incident
-    const response = await axiosInstance.put(`/volunteers/${volunteerId}/release/${incidentId}`);
+    const response = await axiosInstance.put(`/volunteers/${resolvedVolunteerId}/release/${incidentId}`);
     return response;
   } catch (error) {
     console.error('completeAssignment error:', error);
@@ -140,10 +216,42 @@ export const completeAssignment = async (assignmentId, incidentId, volunteerId) 
 
 export const getAvailableIncidents = async () => {
   try {
-    const response = await axiosInstance.get('/incidents/', { params: { status: 'REPORTED', page: 1, limit: 100 } });
-    return response?.items || [];
+    // Do not restrict to REPORTED only; recovery requires seeing IN_PROGRESS incidents
+    const response = await axiosInstance.get('/incidents/', { params: { page: 1, limit: 100 } });
+    const items = response?.items || [];
+    const mapped = items.map(mapIncidentFromBackend);
+    // Only show open incidents on volunteer side
+    return mapped.filter((i) => i.status === 'pending' || i.status === 'active');
   } catch (error) {
     console.error('getAvailableIncidents error:', error);
     throw error;
+  }
+};
+
+// Get all volunteers assigned to a specific incident
+export const getIncidentAssignments = async (incidentId) => {
+  try {
+    // Use incident-scoped history (not admin-only)
+    const response = await axiosInstance.get(`/assignments/incident/${incidentId}`);
+    const events = Array.isArray(response) ? response : (response?.data || []);
+
+    // Count unique volunteers ever assigned (ASSIGNED or RELEASED) to this incident
+    const volunteerIds = new Set();
+    for (const e of events) {
+      if (e?.assignment_type !== 'VOLUNTEER') continue;
+      if (e?.action !== 'ASSIGNED' && e?.action !== 'RELEASED') continue;
+      volunteerIds.add(e.subject_id);
+    }
+
+    // Return synthetic entries for counting
+    return Array.from(volunteerIds).map((vid) => ({
+      incident_id: incidentId,
+      subject_id: vid,
+      action: 'ASSIGNED',
+      timestamp: null,
+    }));
+  } catch (error) {
+    console.error('getIncidentAssignments error:', error);
+    return [];
   }
 };

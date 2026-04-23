@@ -31,14 +31,14 @@ const mapIncidentFromBackend = (inc) => {
     created_at: inc?.created_at,
     latitude,
     longitude,
-    severity: 'medium',
-    type: 'Other',
+    severity: inc?.severity || 'medium',
+    type: inc?.type || 'Other',
     location: {
       lat: latitude,
       lng: longitude,
       address: `(${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)})`,
     },
-    reported_by: { id: String(inc?.reported_by ?? ''), name: '', role: '' },
+    reported_by: { id: String(inc?.reported_by ?? ''), name: inc?.reported_by_name || '', role: '' },
     assigned_volunteer: null,
     images: [],
     updated_at: inc?.created_at,
@@ -75,25 +75,30 @@ export const getIncidents = async ({ status, type, city, page = 1, limit = 10 } 
 
 // ── GET MY INCIDENTS (by user id) ─────────────────────────────────────────────
 export const getMyIncidents = async (userId, { status, page = 1, limit = 10 } = {}) => {
-  const res = await axiosInstance.get('/incidents/my', {
-    params: {
-      status: mapUiStatusToBackend(status),
-      page,
-      limit: Math.min(limit, 100),
-    },
-  });
+  try {
+    const res = await axiosInstance.get('/incidents/my', {
+      params: {
+        status: mapUiStatusToBackend(status),
+        page,
+        limit: Math.min(limit, 100),
+      },
+    });
 
-  const items = res?.items || [];
-  const meta = res?.meta || {};
-  const data = items.map(mapIncidentFromBackend);
+    const items = res?.items || [];
+    const meta = res?.meta || {};
+    const data = items.map(mapIncidentFromBackend);
 
-  return {
-    data,
-    total: meta.total_items ?? data.length,
-    page: meta.page ?? page,
-    limit: meta.limit ?? limit,
-    pages: meta.total_pages ?? 1,
-  };
+    return {
+      data,
+      total: meta.total_items ?? data.length,
+      page: meta.page ?? page,
+      limit: meta.limit ?? limit,
+      pages: meta.total_pages ?? 1,
+    };
+  } catch (error) {
+    console.error('getMyIncidents error:', error);
+    throw error;
+  }
 };
 
 // ── GET INCIDENT BY ID ────────────────────────────────────────────────────────
@@ -137,6 +142,8 @@ export const createIncident = async (payload) => {
   form.append('description', payload?.description || '');
   form.append('latitude', String(latitude ?? ''));
   form.append('longitude', String(longitude ?? ''));
+  form.append('type', payload?.type || 'Other');
+  form.append('severity', payload?.severity || 'medium');
 
   const firstImageFile = payload?.images?.[0]?.file;
   if (firstImageFile instanceof File) {

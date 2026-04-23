@@ -21,11 +21,15 @@ const MyIncidents = () => {
   const [page, setPage]       = useState(1);
   const LIMIT = 8;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['my-incidents', user?.id, statusFilter, page],
     queryFn: () => getMyIncidents(user?.id, { status: statusFilter || undefined, page, limit: LIMIT }),
     enabled: !!user?.id,
   });
+
+  if (error) {
+    console.error('MyIncidents query error:', error);
+  }
 
   const incidents = (data?.data || []).filter((i) =>
     !search || i.title.toLowerCase().includes(search.toLowerCase()) ||

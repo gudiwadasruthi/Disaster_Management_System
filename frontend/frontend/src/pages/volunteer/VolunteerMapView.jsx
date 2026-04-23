@@ -48,21 +48,42 @@ const MapUpdater = ({ center }) => {
 };
 
 const VolunteerMapView = () => {
-  const [mapCenter, setMapCenter] = useState(DEFAULT_POS);
+  const [mapCenter, setMapCenter] = useState(null);
   const [radius, setRadius] = useState(5);
   const [showFilters, setShowFilters] = useState(false);
   const [severityFilter, setSeverityFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [locationLoaded, setLocationLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setMapCenter(DEFAULT_POS);
+      setLocationLoaded(true);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setMapCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setLocationLoaded(true);
+      },
+      () => {
+        setMapCenter(DEFAULT_POS);
+        setLocationLoaded(true);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, []);
 
   const { data: incidents, isLoading, refetch } = useQuery({
-    queryKey: ['volunteer-map-incidents', radius, severityFilter, statusFilter],
+    queryKey: ['volunteer-map-incidents', mapCenter, radius, severityFilter, statusFilter],
     queryFn: () => getIncidents({
-      lat: mapCenter.lat,
-      lng: mapCenter.lng,
+      lat: mapCenter?.lat || DEFAULT_POS.lat,
+      lng: mapCenter?.lng || DEFAULT_POS.lng,
       radius,
       severity: severityFilter || undefined,
       status: statusFilter || undefined,
     }),
+    enabled: !!locationLoaded,
     refetchInterval: 30000,
   });
 
@@ -157,7 +178,7 @@ const VolunteerMapView = () => {
 
       {/* Map */}
       <div className="card p-0 overflow-hidden" style={{ height: '600px' }}>
-        {isLoading ? (
+        {!locationLoaded || isLoading ? (
           <div className="flex items-center justify-center h-full">
             <Spinner size="lg" />
           </div>

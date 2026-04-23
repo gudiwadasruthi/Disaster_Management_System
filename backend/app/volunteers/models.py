@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Boolean, Enum as SAEnum, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Enum as SAEnum, ForeignKey, DateTime
+from datetime import datetime
 from ..core.database import Base
 from ..auth.schemas import VolunteerSkill, AvailabilityStatus, VehicleType
 
@@ -14,3 +15,7 @@ class Volunteer(Base):
     vehicle_type = Column(SAEnum(VehicleType), nullable=True)
     organization = Column(String, nullable=True)
     is_available = Column(Boolean, default=True)
+
+    # Persist current assignment so it survives backend restarts
+    current_incident_id = Column(Integer, nullable=True)
+    assigned_at = Column(DateTime, nullable=True)

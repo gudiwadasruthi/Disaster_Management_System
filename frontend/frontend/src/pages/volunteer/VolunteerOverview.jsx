@@ -18,9 +18,9 @@ const VolunteerOverview = () => {
   const { user, updateUser } = useAuthStore();
 
   const { data: assignments = [], isLoading: assignLoading } = useQuery({
-    queryKey: ['my-assignments', user?.volunteer_id],
-    queryFn: () => getMyAssignments(user?.volunteer_id),
-    enabled: !!user?.volunteer_id,
+    queryKey: ['my-assignments', user?.id],
+    queryFn: () => getMyAssignments(user?.id),
+    enabled: !!user?.id,
   });
 
   const { data: alerts = [] } = useQuery({

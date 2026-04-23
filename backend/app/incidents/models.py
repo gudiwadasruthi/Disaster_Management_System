@@ -13,6 +13,9 @@ class Incident(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
 
+    type = Column(String, nullable=False, default="Other")
+    severity = Column(String, nullable=False, default="medium")
+
     status = Column(SAEnum(IncidentStatus), default=IncidentStatus.REPORTED)
     created_at = Column(DateTime, default=datetime.utcnow)
 

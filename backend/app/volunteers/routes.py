@@ -48,14 +48,36 @@ def assign_volunteer(
     volunteer_id: int,
     incident_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_role("ADMIN"))
+    user: User = Depends(get_current_user)
 ):
     volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
+    if not volunteer:
+        # Allow passing a User.id (common frontend shape) and map to volunteer record
+        volunteer = db.query(Volunteer).filter(Volunteer.user_id == volunteer_id).first()
 
-    if not volunteer or not volunteer.is_available:
-        raise HTTPException(status_code=404, detail="Volunteer not available")
+    if user.role == "VOLUNTEER":
+        if not volunteer or volunteer.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Volunteers can only accept incidents for themselves")
+    elif user.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    if not volunteer:
+        raise HTTPException(status_code=404, detail="Volunteer not found")
+
+    # Idempotency / recovery:
+    # - if already assigned to the same incident, don't fail
+    # - if running an older DB state (unavailable but no current_incident_id), allow setting it
+    if volunteer.is_available is False:
+        if volunteer.current_incident_id is None:
+            pass
+        elif volunteer.current_incident_id != incident_id:
+            raise HTTPException(status_code=404, detail="Volunteer not available")
+
+    resolved_volunteer_id = volunteer.id
 
     volunteer.is_available = False
+    volunteer.current_incident_id = incident_id
+    volunteer.assigned_at = volunteer.assigned_at or __import__('datetime').datetime.utcnow()
     
     from app.incidents.models import Incident
     from app.incidents.schemas import IncidentStatus
@@ -67,7 +89,7 @@ def assign_volunteer(
 
     # Analytics hook
     for vol in VOLUNTEERS:
-        if vol["id"] == volunteer_id:
+        if vol["id"] == resolved_volunteer_id:
             vol["available"] = False
             break
 
@@ -75,8 +97,8 @@ def assign_volunteer(
         assignment_type="VOLUNTEER",
         action="ASSIGNED",
         incident_id=incident_id,
-        subject_id=volunteer_id,
-        admin_id=admin.id,
+        subject_id=resolved_volunteer_id,
+        admin_id=user.id,
         reason="Primary responder"
     )
 
@@ -88,19 +110,39 @@ def release_volunteer(
     volunteer_id: int,
     incident_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_role("ADMIN"))
+    user: User = Depends(get_current_user)
 ):
     volunteer = db.query(Volunteer).filter(Volunteer.id == volunteer_id).first()
+    if not volunteer:
+        volunteer = db.query(Volunteer).filter(Volunteer.user_id == volunteer_id).first()
+
+    if user.role == "VOLUNTEER":
+        if not volunteer or volunteer.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Volunteers can only release themselves")
+    elif user.role != "ADMIN":
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     if not volunteer:
         raise HTTPException(status_code=404, detail="Volunteer not found")
 
+    resolved_volunteer_id = volunteer.id
+
     volunteer.is_available = True
+    volunteer.current_incident_id = None
+    volunteer.assigned_at = None
+
+    # Update incident status to RESOLVED when volunteer completes it
+    from app.incidents.models import Incident
+    from app.incidents.schemas import IncidentStatus
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if incident:
+        incident.status = IncidentStatus.RESOLVED
+
     db.commit()
 
     # Analytics hook
     for vol in VOLUNTEERS:
-        if vol["id"] == volunteer_id:
+        if vol["id"] == resolved_volunteer_id:
             vol["available"] = True
             break
     
@@ -108,8 +150,8 @@ def release_volunteer(
         assignment_type="VOLUNTEER",
         action="RELEASED",
         incident_id=incident_id,
-        subject_id=volunteer_id,
-        admin_id=admin.id,
+        subject_id=resolved_volunteer_id,
+        admin_id=user.id,
         reason="Task completed"
     )
 

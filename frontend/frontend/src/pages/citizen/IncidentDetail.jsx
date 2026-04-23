@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import {
   ChevronLeft, MapPin, Clock, User, Truck, AlertTriangle,
-  CheckCircle2, Activity, Image as ImageIcon, MessageSquare, ThumbsUp,
+  CheckCircle2, Activity, Image as ImageIcon,
 } from 'lucide-react';
 import { getIncidentById, updateIncidentStatus } from '../../api/incidentService';
+import { reverseGeocode } from '../../api/geocodeService';
 import Badge from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/EmptyState';
 import { formatDateTime, timeAgo, severityColor } from '../../utils/helpers';
-import toast from 'react-hot-toast';
 
 const STATUS_TIMELINE = [
   { key: 'pending',  label: 'Reported',   icon: AlertTriangle },
@@ -21,43 +21,36 @@ const STATUS_TIMELINE = [
 const IncidentDetail = () => {
   const { id } = useParams();
   const qc     = useQueryClient();
-  const [hasUpvoted, setHasUpvoted] = useState(false);
-  const [showComments, setShowComments] = useState(false);
-  const [newComment, setNewComment] = useState('');
-  const [localComments, setLocalComments] = useState([]);
-  const [upvoteCount, setUpvoteCount] = useState(34);
-  
-  // Sample real-looking comments
-  const [sampleComments] = useState([
-    { id: 1, author: 'John Smith', text: 'This incident needs immediate attention. The area is heavily populated.', time: '2 hours ago', avatar: 'J' },
-    { id: 2, author: 'Sarah Johnson', text: 'I live nearby and can confirm this is accurate. Please send help quickly.', time: '1 hour ago', avatar: 'S' },
-    { id: 3, author: 'Mike Davis', text: 'Volunteer team has been notified. They should arrive within 15 minutes.', time: '45 minutes ago', avatar: 'M' },
-  ]);
 
   const { data: incident, isLoading } = useQuery({
     queryKey: ['incident', id],
     queryFn:  () => getIncidentById(id),
   });
 
-  const handleUpvote = () => {
-    setHasUpvoted(!hasUpvoted);
-    setUpvoteCount(prev => hasUpvoted ? prev - 1 : prev + 1);
-    toast.success(hasUpvoted ? 'Upvote removed' : 'Upvoted!');
-  };
+  const [resolvedLocation, setResolvedLocation] = useState(null);
 
-  const handleAddComment = () => {
-    if (newComment.trim()) {
-      const comment = {
-        id: Date.now(),
-        text: newComment,
-        author: 'You',
-        time: 'Just now'
-      };
-      setLocalComments([...localComments, comment]);
-      setNewComment('');
-      toast.success('Comment added!');
-    }
-  };
+  useEffect(() => {
+    let active = true;
+
+    const run = async () => {
+      if (!incident?.latitude || !incident?.longitude) return;
+
+      const currentAddress = String(incident?.location?.address || '');
+      const looksLikeCoords = currentAddress.startsWith('(') && currentAddress.includes(',') && currentAddress.endsWith(')');
+      if (!looksLikeCoords) return;
+
+      try {
+        const geo = await reverseGeocode(incident.latitude, incident.longitude);
+        if (!active) return;
+        setResolvedLocation(geo);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    run();
+    return () => { active = false; };
+  }, [incident?.latitude, incident?.longitude, incident?.location?.address]);
 
   if (isLoading) return (
     <div className="flex items-center justify-center py-24">
@@ -75,6 +68,8 @@ const IncidentDetail = () => {
   const sev        = severityColor(incident.severity);
   const statusIdx  = STATUS_TIMELINE.findIndex((s) => s.key === incident.status);
   const currentIdx = statusIdx === -1 ? 0 : statusIdx;
+
+  const locationLabel = resolvedLocation?.displayName || incident.location?.address;
 
   return (
     <div className="animate-fade-in-up" style={{ paddingBottom: '3rem', paddingLeft: '1rem', paddingRight: '1rem', maxWidth: '1000px', margin: '0 auto' }}>
@@ -148,7 +143,7 @@ const IncidentDetail = () => {
           <h4 className="text-sm font-bold text-white font-display" style={{ marginBottom: '1.5rem' }}>Incident Details</h4>
           <div className="grid grid-cols-1 lg:grid-cols-2" style={{ gap: '1.5rem' }}>
             {[
-              { icon: MapPin,  label: 'Location',  value: incident.location?.address, color: '#3b82f6' },
+              { icon: MapPin,  label: 'Location',  value: locationLabel, color: '#3b82f6' },
               { icon: Clock,   label: 'Reported',  value: formatDateTime(incident.created_at), color: '#8b5cf6' },
               { icon: Clock,   label: 'Updated',   value: timeAgo(incident.updated_at), color: '#10b981' },
               { icon: User,    label: 'Reported By', value: incident.reported_by?.name, color: '#f59e0b' },
@@ -179,7 +174,7 @@ const IncidentDetail = () => {
                         {label}
                       </p>
                       <p className="text-base font-medium text-slate-200 leading-relaxed transition-colors duration-300 group-hover:text-white">
-                        {value || 'â'}
+                        {value || '—'}
                       </p>
                     </div>
                   </div>
@@ -265,74 +260,6 @@ const IncidentDetail = () => {
                   <img src={src} alt={`Incident ${i+1}`} className="w-full h-full object-cover" />
                 </div>
               ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stats */}
-        <div className="flex items-center gap-8 pt-8" style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-          <button 
-            onClick={handleUpvote}
-            className="flex items-center gap-3 text-sm transition-colors cursor-pointer"
-            style={{ color: hasUpvoted ? '#4ade80' : '#94a3b8' }}
-          >
-            <ThumbsUp className="w-5 h-5" style={{ fill: hasUpvoted ? '#4ade80' : 'none' }} /> 
-            {upvoteCount} upvotes
-          </button>
-          <button 
-            onClick={() => setShowComments(!showComments)}
-            className="flex items-center gap-3 text-sm text-slate-400 hover:text-blue-400 transition-colors cursor-pointer"
-          >
-            <MessageSquare className="w-5 h-5" /> {sampleComments.length + localComments.length} comments
-          </button>
-        </div>
-
-        {/* Comments Section */}
-        {showComments && (
-          <div className="mt-32 pt-20" style={{ borderTop: '2px solid rgba(255,255,255,0.2)' }}>
-            <h4 className="text-lg font-bold text-white font-display mb-24" style={{ color: '#60a5fa' }}>Comments</h4>
-            
-            {/* Add Comment */}
-            <div className="flex gap-6 mb-20">
-              <input
-                type="text"
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                placeholder="Add a comment..."
-                className="flex-1 bg-slate-800/50 border border-white/10 rounded-xl px-10 py-6 text-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500/50 transition-colors"
-                style={{ letterSpacing: '0.01em', lineHeight: '1.6' }}
-              />
-              <button
-                onClick={handleAddComment}
-                className="px-14 py-6 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-lg font-semibold transition-all duration-300 hover:scale-105 hover:shadow-lg"
-                style={{ letterSpacing: '0.025em', minWidth: '140px' }}
-              >
-                Post
-              </button>
-            </div>
-
-            {/* Comments List */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem', paddingTop: '1rem' }}>
-              {[...sampleComments, ...localComments].length === 0 ? (
-                <p className="text-sm text-slate-500 text-center py-8">No comments yet. Be the first to comment!</p>
-              ) : (
-                <>
-                  {[...sampleComments, ...localComments].map((comment) => (
-                    <div key={comment.id} className="flex gap-4 p-5 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
-                      <div className="w-12 h-12 rounded-full bg-indigo-500/20 flex items-center justify-center shrink-0">
-                        <span className="text-indigo-400 text-sm font-bold">{comment.avatar}</span>
-                      </div>
-                      <div className="flex-1" style={{ paddingRight: '1rem' }}>
-                        <div className="flex items-center gap-3 mb-3">
-                          <span className="text-base font-semibold text-white" style={{ letterSpacing: '0.01em' }}>{comment.author}</span>
-                          <span className="text-sm text-slate-500">{comment.time}</span>
-                        </div>
-                        <p className="text-base text-slate-300 leading-relaxed" style={{ letterSpacing: '0.01em', lineHeight: '1.6' }}>{comment.text}</p>
-                      </div>
-                    </div>
-                  ))}
-                </>
-              )}
             </div>
           </div>
         )}

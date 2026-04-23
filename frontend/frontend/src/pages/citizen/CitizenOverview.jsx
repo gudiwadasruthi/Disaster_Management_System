@@ -17,6 +17,9 @@ import { timeAgo, alertTypeConfig } from '../../utils/helpers';
 const CitizenOverview = () => {
   const user = useAuthStore((s) => s.user);
 
+  const address = user?.address;
+  const showAddress = address && !String(address).toLowerCase().startsWith('mock location');
+
   const { data: incData, isLoading: incLoading } = useQuery({
     queryKey: ['my-incidents', user?.id],
     queryFn: () => getMyIncidents(user?.id),
@@ -268,7 +271,7 @@ const CitizenOverview = () => {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
               <p className="text-sm text-slate-300 font-medium">{user?.city || 'Location not set'}</p>
-              <p className="text-xs text-slate-500">{user?.address || 'Update your profile location'}</p>
+              <p className="text-xs text-slate-500">{showAddress ? address : 'Update your profile location'}</p>
             </div>
             <div className="flex" style={{ gap: '0.5rem', marginTop: '1rem' }}>
               <Link to="/citizen/profile" className="text-xs text-indigo-400 hover:text-indigo-300 font-medium">

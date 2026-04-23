@@ -7,6 +7,8 @@ class IncidentCreate(BaseModel):
     description: str
     latitude: float
     longitude: float
+    type: str | None = None
+    severity: str | None = None
 
 class IncidentResponse(BaseModel):
     id: int
@@ -14,8 +16,12 @@ class IncidentResponse(BaseModel):
     description: str
     latitude: float
     longitude: float
+    type: str | None = None
+    severity: str | None = None
     status: IncidentStatus
     created_at: datetime
+    reported_by: int | None = None
+    reported_by_name: str | None = None
 
     class Config:
         orm_mode = True

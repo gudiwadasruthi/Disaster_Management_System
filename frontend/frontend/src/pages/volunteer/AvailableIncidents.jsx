@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { MapPin, Clock, AlertTriangle, CheckCircle, Zap, Filter, Search, X, CheckCircle2 } from 'lucide-react';
-import { getAvailableIncidents } from '../../api/volunteerService';
-import { acceptIncident, completeAssignment } from '../../api/volunteerService';
-import { getMyAssignments } from '../../api/volunteerService';
+import { MapPin, Clock, AlertTriangle, CheckCircle, Zap, Filter, Search, X, CheckCircle2, User } from 'lucide-react';
+import { getAvailableIncidents, acceptIncident, completeAssignment, getMyAssignments, getIncidentAssignments } from '../../api/volunteerService';
 import useAuthStore from '../../store/authStore';
 import Badge from '../../components/ui/Badge';
 import EmptyState from '../../components/ui/EmptyState';
 import { Spinner } from '../../components/ui/EmptyState';
 import { INCIDENT_TYPES } from '../../api/incidentService';
+import { reverseGeocode } from '../../api/geocodeService';
 import { timeAgo, severityColor } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 
@@ -18,6 +17,8 @@ const AvailableIncidents = () => {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [acceptingId, setAcceptingId] = useState(null);
+  const [resolvedLocations, setResolvedLocations] = useState({});
+  const [locallyAccepted, setLocallyAccepted] = useState({});
 
   const { data: incidents = [], isLoading } = useQuery({
     queryKey: ['available-incidents'],
@@ -31,6 +32,34 @@ const AvailableIncidents = () => {
     enabled: !!user?.id,
   });
 
+  const filtered = useMemo(() => {
+    return incidents.filter((i) => {
+      const isAccepted =
+        locallyAccepted[String(i.id)] === true ||
+        assignments.some((a) => String(a.incident_id) === String(i.id) && a.status !== 'completed');
+      if (isAccepted) return false;
+      const matchSearch = !search || i.title.toLowerCase().includes(search.toLowerCase()) || i.id.toLowerCase().includes(search.toLowerCase());
+      const matchType   = !typeFilter || i.type === typeFilter;
+      return matchSearch && matchType;
+    });
+  }, [incidents, assignments, search, typeFilter]);
+
+  // Fetch volunteer counts for all visible incidents
+  const { data: volunteerCounts = {} } = useQuery({
+    queryKey: ['volunteer-counts', filtered.map(i => i.id).join(',')],
+    queryFn: async () => {
+      const counts = {};
+      await Promise.all(
+        filtered.slice(0, 10).map(async (inc) => {
+          const vols = await getIncidentAssignments(inc.id);
+          counts[inc.id] = vols.length;
+        })
+      );
+      return counts;
+    },
+    enabled: filtered.length > 0,
+  });
+
   const accept = useMutation({
     mutationFn: ({ incidentId }) => {
       setAcceptingId(incidentId);
@@ -39,25 +68,27 @@ const AvailableIncidents = () => {
     onSuccess: (_, { title, incidentId }) => {
       toast.success(`You've accepted the incident!`);
       setAcceptingId(null);
+      setLocallyAccepted((prev) => ({ ...prev, [String(incidentId)]: true }));
       qc.invalidateQueries({ queryKey: ['available-incidents'] });
-      qc.invalidateQueries({ queryKey: ['my-assignments'] });
+      qc.invalidateQueries({ queryKey: ['my-assignments', user?.id] });
     },
-    onError: () => {
-      toast.error('Could not accept incident.');
+    onError: (err) => {
+      const msg = err?.response?.data?.detail || err?.message || 'Could not accept incident.';
+      toast.error(msg);
       setAcceptingId(null);
     },
   });
 
   const complete = useMutation({
-    mutationFn: ({ assignmentId }) => {
-      setAcceptingId(assignmentId);
-      return completeAssignment(assignmentId, user?.id);
+    mutationFn: ({ incidentId }) => {
+      setAcceptingId(incidentId);
+      return completeAssignment(incidentId, user?.id);
     },
     onSuccess: () => {
       toast.success('Incident marked as completed!');
       setAcceptingId(null);
       qc.invalidateQueries({ queryKey: ['available-incidents'] });
-      qc.invalidateQueries({ queryKey: ['my-assignments'] });
+      qc.invalidateQueries({ queryKey: ['my-assignments', user?.id] });
     },
     onError: () => {
       toast.error('Could not complete incident.');
@@ -65,19 +96,50 @@ const AvailableIncidents = () => {
     },
   });
 
-  const filtered = incidents.filter((i) => {
-    const matchSearch = !search || i.title.toLowerCase().includes(search.toLowerCase()) || i.id.toLowerCase().includes(search.toLowerCase());
-    const matchType   = !typeFilter || i.type === typeFilter;
-    return matchSearch && matchType;
-  });
-
   const isIncidentAccepted = (incidentId) => {
-    return assignments.some(a => a.incident_id === incidentId);
+    return assignments.some(a => String(a.incident_id) === String(incidentId));
   };
 
   const getAssignmentForIncident = (incidentId) => {
-    return assignments.find(a => a.incident_id === incidentId);
+    return assignments.find(a => String(a.incident_id) === String(incidentId));
   };
+
+  useEffect(() => {
+    let active = true;
+
+    const run = async () => {
+      const need = filtered
+        .filter((inc) => {
+          const addr = String(inc?.location?.address || '');
+          const looksLikeCoords = addr.startsWith('(') && addr.includes(',') && addr.endsWith(')');
+          return looksLikeCoords && !resolvedLocations[inc.id] && inc?.latitude && inc?.longitude;
+        })
+        .slice(0, 10);
+
+      if (need.length === 0) return;
+
+      try {
+        const results = await Promise.all(
+          need.map(async (inc) => {
+            const geo = await reverseGeocode(inc.latitude, inc.longitude);
+            return [inc.id, geo?.displayName || ''];
+          })
+        );
+
+        if (!active) return;
+        setResolvedLocations((prev) => {
+          const next = { ...prev };
+          for (const [id, name] of results) next[id] = name;
+          return next;
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    run();
+    return () => { active = false; };
+  }, [filtered]);
 
   return (
     <div className="animate-fade-in-up" style={{ paddingBottom: '3rem', paddingLeft: '1rem', paddingRight: '1rem' }}>
@@ -87,7 +149,7 @@ const AvailableIncidents = () => {
           <p className="text-slate-500 text-sm mt-2">{filtered.length} incident{filtered.length !== 1 ? 's' : ''} awaiting volunteers</p>
         </div>
         {user?.is_available === false && (
-          <div className="badge badge-warning">Set yourself Available to accept incidents</div>
+          <div className="badge badge-warning">You are currently unavailable (backend-controlled). If this is incorrect, try accepting/releasing an incident to resync.</div>
         )}
       </div>
 
@@ -152,16 +214,27 @@ const AvailableIncidents = () => {
                 </div>
 
                 {/* Info - Location */}
-                <div className="flex items-center gap-2 text-xs text-slate-400" style={{ marginBottom: '1rem' }}>
+                <div className="flex items-center gap-2 text-xs text-slate-400" style={{ marginBottom: '0.5rem' }}>
                   <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                  <span className="truncate">{inc.location?.address}</span>
+                  <span className="truncate">{resolvedLocations[inc.id] || inc.location?.address}</span>
                 </div>
 
-                {/* Footer - Severity and Time */}
+                {/* Info - Reported By */}
+                <div className="flex items-center gap-2 text-xs text-slate-400" style={{ marginBottom: '1rem' }}>
+                  <User className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="truncate">{inc.reported_by?.name || 'Anonymous'}</span>
+                </div>
+
+                {/* Footer - Severity, Volunteers, Time */}
                 <div className="flex items-center justify-between" style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-                  <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full border ${sev.text} ${sev.bg} ${sev.border}`}>
-                    {inc.severity}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full border ${sev.text} ${sev.bg} ${sev.border}`}>
+                      {inc.severity}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {volunteerCounts[inc.id] || 0} volunteer{(volunteerCounts[inc.id] || 0) === 1 ? '' : 's'}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2 text-xs text-slate-500">
                     <Clock className="w-3.5 h-3.5" />
                     <span>{timeAgo(inc.created_at)}</span>
@@ -169,11 +242,11 @@ const AvailableIncidents = () => {
                 </div>
 
                 {/* Accept Button (only for not accepted) */}
-                {!isAccepted && !isCompleted && (
+                {!isAccepted && !isCompleted && (inc.status === 'pending' || inc.status === 'active') && (
                   <div style={{ marginTop: '1rem' }} onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => accept.mutate({ incidentId: inc.id, title: inc.title })}
-                      disabled={acceptingId === inc.id || !user?.is_available}
+                      disabled={acceptingId === inc.id}
                       className="btn btn-success btn-sm w-full">
                       {acceptingId === inc.id ? <Spinner size="sm" /> : <><Zap className="w-3.5 h-3.5 mr-1" /> Accept</>}
                     </button>

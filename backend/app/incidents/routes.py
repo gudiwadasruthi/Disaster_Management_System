@@ -23,6 +23,8 @@ async def create_incident(
     description: str = Form(..., description="Incident description"),
     latitude: float = Form(..., description="Latitude coordinate"),
     longitude: float = Form(..., description="Longitude coordinate"),
+    type: str | None = Form(None, description="Incident type"),
+    severity: str | None = Form(None, description="Incident severity"),
     photo: UploadFile | None = File(None, description="Optional incident photo (jpg, png, gif, max 5MB)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -37,6 +39,8 @@ async def create_incident(
         description=description,
         latitude=latitude,
         longitude=longitude,
+        type=type or "Other",
+        severity=severity or "medium",
         reported_by=current_user.id
     )
     
@@ -79,8 +83,20 @@ async def create_incident(
             incident.photo_uploaded = False
         finally:
             await photo.close()
-    
-    return incident
+
+    return {
+        "id": incident.id,
+        "title": incident.title,
+        "description": incident.description,
+        "latitude": incident.latitude,
+        "longitude": incident.longitude,
+        "type": incident.type,
+        "severity": incident.severity,
+        "status": incident.status,
+        "created_at": incident.created_at,
+        "reported_by": incident.reported_by,
+        "reported_by_name": current_user.full_name,
+    }
 
 # Admin verifies incident
 @router.put("/{incident_id}/verify")
@@ -205,12 +221,30 @@ def list_incidents(
     page: int = Query(1, ge=1),
     limit: int = Query(10, le=100)
 ):
-    query = db.query(Incident)
+    from app.users.models import User
+    query = db.query(Incident, User.full_name.label("reported_by_name")).join(User, Incident.reported_by == User.id)
     if status:
         query = query.filter(Incident.status == status)
-    
-    incidents = query.all()
-    return paginate(incidents, page, limit)
+
+    results = query.all()
+    incidents_with_names = []
+    for incident, reported_by_name in results:
+        inc_dict = {
+            "id": incident.id,
+            "title": incident.title,
+            "description": incident.description,
+            "latitude": incident.latitude,
+            "longitude": incident.longitude,
+            "type": getattr(incident, "type", None),
+            "severity": getattr(incident, "severity", None),
+            "status": incident.status.value if hasattr(incident.status, "value") else incident.status,
+            "created_at": incident.created_at,
+            "reported_by": incident.reported_by,
+            "reported_by_name": reported_by_name,
+        }
+        incidents_with_names.append(inc_dict)
+
+    return paginate(incidents_with_names, page, limit)
 
 # Location-based incident search
 @router.get("/nearby")
@@ -266,6 +300,8 @@ def get_nearby_incidents(
                 "description": incident.description,
                 "latitude": incident.latitude,
                 "longitude": incident.longitude,
+                "type": getattr(incident, "type", None),
+                "severity": getattr(incident, "severity", None),
                 "status": incident.status.value if hasattr(incident.status, 'value') else incident.status,
                 "created_at": incident.created_at,
                 "reported_by": incident.reported_by,
@@ -287,7 +323,21 @@ def get_incident(
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
-    return incident
+
+    reporter = db.query(User).filter(User.id == incident.reported_by).first()
+    return {
+        "id": incident.id,
+        "title": incident.title,
+        "description": incident.description,
+        "latitude": incident.latitude,
+        "longitude": incident.longitude,
+        "type": getattr(incident, "type", None),
+        "severity": getattr(incident, "severity", None),
+        "status": incident.status,
+        "created_at": incident.created_at,
+        "reported_by": incident.reported_by,
+        "reported_by_name": reporter.full_name if reporter else None,
+    }
 
 
 # File upload for incident photos

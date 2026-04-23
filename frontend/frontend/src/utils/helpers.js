@@ -23,14 +23,20 @@ export const getProfilePath = (role) => {
 /** Format ISO date string */
 export const formatDate = (iso, opts = {}) => {
   if (!iso) return '—';
+  const s = String(iso);
+  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(s);
+  const d = new Date(hasTz ? s : `${s}Z`);
   const defaults = { day: '2-digit', month: 'short', year: 'numeric' };
-  return new Date(iso).toLocaleDateString('en-IN', { ...defaults, ...opts });
+  return d.toLocaleDateString('en-IN', { ...defaults, ...opts });
 };
 
 /** Format ISO date with time */
 export const formatDateTime = (iso) => {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-IN', {
+  const s = String(iso);
+  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(s);
+  const d = new Date(hasTz ? s : `${s}Z`);
+  return d.toLocaleString('en-IN', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
@@ -39,10 +45,12 @@ export const formatDateTime = (iso) => {
 /** Relative time (e.g. "2 hours ago") */
 export const timeAgo = (iso) => {
   if (!iso) return '—';
-  const diff = Date.now() - new Date(iso).getTime();
-  const s = Math.floor(diff / 1000);
-  if (s < 60) return 'just now';
-  const m = Math.floor(s / 60);  if (m < 60) return `${m}m ago`;
+  const s = String(iso);
+  const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(s);
+  const diff = Date.now() - new Date(hasTz ? s : `${s}Z`).getTime();
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return 'just now';
+  const m = Math.floor(secs / 60);  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);  if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);  if (d < 30) return `${d}d ago`;
   return formatDate(iso);

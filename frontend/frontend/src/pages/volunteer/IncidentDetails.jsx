@@ -1,21 +1,24 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { MapPin, Clock, AlertTriangle, Users, MessageSquare, ArrowLeft, CheckCircle2, Activity } from 'lucide-react';
+import { MapPin, Clock, AlertTriangle, Users, MessageSquare, ArrowLeft, CheckCircle2, Activity, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getIncidentById } from '../../api/incidentService';
-import { getMyAssignments, completeAssignment } from '../../api/volunteerService';
+import { getMyAssignments, completeAssignment, getIncidentAssignments } from '../../api/volunteerService';
 import useAuthStore from '../../store/authStore';
 import Badge from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/EmptyState';
 import { timeAgo, severityColor, formatDateTime } from '../../utils/helpers';
 import toast from 'react-hot-toast';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { reverseGeocode } from '../../api/geocodeService';
 
 const IncidentDetails = () => {
   const { id } = useParams();
   const { user } = useAuthStore();
   const qc = useQueryClient();
+
+  const [resolvedLocation, setResolvedLocation] = useState(null);
 
   const { data: incident, isLoading } = useQuery({
     queryKey: ['incident', id],
@@ -29,8 +32,18 @@ const IncidentDetails = () => {
     enabled: !!user?.id,
   });
 
+  const { data: incidentVolunteers = [], isLoading: volunteersLoading } = useQuery({
+    queryKey: ['incident-volunteers', id],
+    queryFn: () => getIncidentAssignments(id),
+    enabled: !!id,
+    retry: false,
+    onError: (err) => {
+      console.error('Failed to load volunteer count:', err);
+    },
+  });
+
   const complete = useMutation({
-    mutationFn: ({ assignmentId }) => completeAssignment(assignmentId, user?.id),
+    mutationFn: ({ incidentId }) => completeAssignment(incidentId, user?.id),
     onSuccess: () => {
       toast.success('Incident marked as completed!');
       qc.invalidateQueries({ queryKey: ['my-assignments'] });
@@ -41,8 +54,27 @@ const IncidentDetails = () => {
     },
   });
 
-  const myAssignment = assignments.find(a => a.incident_id === id);
+  const myAssignment = assignments.find(a => String(a.incident_id) === String(id));
   const canComplete = myAssignment && myAssignment.status === 'in_progress';
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      if (!incident?.latitude || !incident?.longitude) return;
+      const addr = String(incident?.location?.address || '');
+      const looksLikeCoords = addr.startsWith('(') && addr.includes(',') && addr.endsWith(')');
+      if (!looksLikeCoords) return;
+      try {
+        const geo = await reverseGeocode(incident.latitude, incident.longitude);
+        if (!active) return;
+        setResolvedLocation(geo?.displayName || null);
+      } catch {
+        // ignore
+      }
+    };
+    run();
+    return () => { active = false; };
+  }, [incident?.latitude, incident?.longitude, incident?.location?.address]);
 
   if (isLoading) {
     return (
@@ -63,6 +95,20 @@ const IncidentDetails = () => {
         </Link>
       </div>
     );
+  // Safe render to prevent blank page on data issues
+  if (!incident || typeof incident !== 'object') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen text-center px-4">
+        <AlertTriangle className="w-16 h-16 text-slate-600 mb-4" />
+        <h1 className="text-2xl font-bold text-white mb-2">Incident Data Error</h1>
+        <p className="text-slate-500 mb-6">Unable to load incident details. Please try again.</p>
+        <Link to="/volunteer/dashboard" className="btn btn-primary">
+          Back to Dashboard
+        </Link>
+      </div>
+    );
+  }
+
   }
 
   const sev = severityColor(incident.severity);
@@ -99,7 +145,7 @@ const IncidentDetails = () => {
             <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: '1rem' }}>
               <div className="flex items-center gap-3 text-slate-400">
                 <MapPin className="w-4 h-4" />
-                <span className="text-sm">{incident.location?.address || 'Location not specified'}</span>
+                <span className="text-sm">{resolvedLocation || incident.location?.address || 'Location not specified'}</span>
               </div>
               <div className="flex items-center gap-3 text-slate-400">
                 <AlertTriangle className="w-4 h-4" />
@@ -111,7 +157,11 @@ const IncidentDetails = () => {
               </div>
               <div className="flex items-center gap-3 text-slate-400">
                 <Users className="w-4 h-4" />
-                <span className="text-sm">{incident.upvotes || 0} reports</span>
+                <span className="text-sm">{incidentVolunteers.length || 0} volunteer{incidentVolunteers.length === 1 ? '' : 's'} assigned</span>
+              </div>
+              <div className="flex items-center gap-3 text-slate-400">
+                <User className="w-4 h-4" />
+                <span className="text-sm">Reported by: {incident.reported_by?.name || 'Anonymous'}</span>
               </div>
             </div>
           </div>
@@ -131,7 +181,7 @@ const IncidentDetails = () => {
                 </div>
                 {canComplete && (
                   <button
-                    onClick={() => complete.mutate({ assignmentId: myAssignment.id })}
+                    onClick={() => complete.mutate({ incidentId: myAssignment.incident_id })}
                     disabled={complete.isPending}
                     className="btn btn-primary"
                   >
@@ -153,7 +203,7 @@ const IncidentDetails = () => {
                 <>
                   {canComplete && (
                     <button
-                      onClick={() => complete.mutate({ assignmentId: myAssignment.id })}
+                      onClick={() => complete.mutate({ incidentId: myAssignment.incident_id })}
                       disabled={complete.isPending}
                       className="btn btn-primary w-full"
                     >
@@ -197,7 +247,7 @@ const IncidentDetails = () => {
                   <div className="w-2 h-2 rounded-full bg-green-400 mt-2"></div>
                   <div>
                     <p className="text-sm text-white">Completed</p>
-                    <p className="text-xs text-slate-500">{formatDateTime(myAssignment.completed_at)}</p>
+                    <p className="text-xs text-slate-500">{formatDateTime(myAssignment.completed_at || myAssignment.assigned_at)}</p>
                   </div>
                 </div>
               )}

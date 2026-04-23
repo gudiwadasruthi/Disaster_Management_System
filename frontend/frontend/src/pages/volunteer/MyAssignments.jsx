@@ -27,7 +27,8 @@ const MyAssignments = () => {
   const complete = useMutation({
     mutationFn: ({ assignmentId }) => {
       setCompletingId(assignmentId);
-      return completeAssignment(assignmentId, user?.id);
+      const a = assignments.find((x) => String(x.id) === String(assignmentId));
+      return completeAssignment(a?.incident_id, user?.id);
     },
     onSuccess: () => {
       toast.success('Assignment marked as completed!');

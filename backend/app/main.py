@@ -19,12 +19,16 @@ app = FastAPI(title=settings.APP_NAME)
 
 API_PREFIX = "/api/v1"
 
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+if settings.FRONTEND_URL:
+    origins.append(settings.FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,6 +41,20 @@ def on_startup():
     from app.resources import models as resource_models
     from app.alerts import models as alert_models
     Base.metadata.create_all(bind=engine)
+
+    # Lightweight migration for existing databases (adds missing incident columns)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text('ALTER TABLE incidents ADD COLUMN IF NOT EXISTS type VARCHAR'))
+            conn.execute(text("UPDATE incidents SET type = 'Other' WHERE type IS NULL"))
+            conn.execute(text('ALTER TABLE incidents ADD COLUMN IF NOT EXISTS severity VARCHAR'))
+            conn.execute(text("UPDATE incidents SET severity = 'medium' WHERE severity IS NULL"))
+
+            conn.execute(text('ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS current_incident_id INTEGER'))
+            conn.execute(text('ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP'))
+    except Exception:
+        # Ignore if DB doesn't support IF NOT EXISTS or table missing
+        pass
 
 app.include_router(auth_router, prefix=API_PREFIX)
 app.include_router(user_router, prefix=API_PREFIX)
