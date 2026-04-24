@@ -1,5 +1,9 @@
 from logging.config import fileConfig
 import os
+import sys
+
+# Add the backend root directory to sys.path so 'app' can be imported
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from dotenv import load_dotenv
 
