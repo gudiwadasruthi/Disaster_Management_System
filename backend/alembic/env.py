@@ -33,7 +33,13 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.core.database import Base
-from app.users.models import User, Citizen, Volunteer
+from app.users.models import User
+from app.volunteers.models import Volunteer
+from app.incidents.models import Incident
+from app.resources.models import Resource
+from app.alerts.models import Alert
+from app.assignments.db_models import AssignmentLog
+
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
