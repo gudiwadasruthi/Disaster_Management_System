@@ -25,6 +25,7 @@ const MyIncidents = () => {
     queryKey: ['my-incidents', user?.id, statusFilter, page],
     queryFn: () => getMyIncidents(user?.id, { status: statusFilter || undefined, page, limit: LIMIT }),
     enabled: !!user?.id,
+    refetchInterval: 10000,
   });
 
   if (error) {

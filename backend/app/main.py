@@ -40,6 +40,7 @@ def on_startup():
     from app.volunteers import models as volunteer_models
     from app.resources import models as resource_models
     from app.alerts import models as alert_models
+    from app.assignments import db_models as assignment_db_models  # ensure table exists
     Base.metadata.create_all(bind=engine)
 
     # Lightweight migration for existing databases (adds missing incident columns)

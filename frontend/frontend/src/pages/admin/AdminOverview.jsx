@@ -10,6 +10,7 @@ import { SkeletonCard } from '../../components/ui/EmptyState';
 import { getIncidents } from '../../api/incidentService';
 import { getVolunteers } from '../../api/volunteerService';
 import { getResources } from '../../api/resourceService';
+import axiosInstance from '../../api/axiosInstance';
 import { timeAgo, truncate } from '../../utils/helpers';
 
 /* ── Mini activity feed item ─────────────────────────────────────────────────── */
@@ -51,11 +52,21 @@ const AdminOverview = () => {
   const incidentsQ  = useQuery({ queryKey: ['incidents-all'],  queryFn: () => getIncidents() });
   const volunteersQ = useQuery({ queryKey: ['volunteers-all'], queryFn: () => getVolunteers() });
   const resourcesQ  = useQuery({ queryKey: ['resources-all'],  queryFn: () => getResources() });
+  const assignmentsQ = useQuery({ 
+    queryKey: ['assignments-all'], 
+    queryFn: async () => {
+      const res = await axiosInstance.get('/assignments/');
+      return Array.isArray(res) ? res : (res?.data || []);
+    },
+    retry: 2,
+    refetchInterval: 30000,
+  });
 
   const incidents  = incidentsQ.data?.data  || [];
   const volunteers = volunteersQ.data?.data || [];
   const resources  = resourcesQ.data?.data  || [];
-  const isLoading  = incidentsQ.isLoading || volunteersQ.isLoading || resourcesQ.isLoading;
+  const assignments = assignmentsQ.data || [];
+  const isLoading  = incidentsQ.isLoading || volunteersQ.isLoading || resourcesQ.isLoading || assignmentsQ.isLoading;
 
   const stats = {
     total:     incidentsQ.data?.total    || 0,
@@ -71,6 +82,50 @@ const AdminOverview = () => {
   const recentIncidents = [...incidents]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 5);
+
+  const recentActivities = [...assignments]
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .slice(0, 3)
+    .map(event => {
+      let title, subtitle, icon, iconBg;
+      if (event.assignment_type === 'VOLUNTEER') {
+        const vol = volunteers.find(v => v.id === event.subject_id);
+        const name = vol ? `${vol.first_name} ${vol.last_name}` : `Volunteer #${event.subject_id}`;
+        if (event.action === 'ASSIGNED') {
+          title = "Volunteer deployed"; subtitle = `${name} -> INC-${event.incident_id}`;
+          icon = Users; iconBg = "rgba(34,197,94,0.2)";
+        } else {
+          title = "Volunteer released"; subtitle = `${name} from INC-${event.incident_id}`;
+          icon = CheckCircle; iconBg = "rgba(168,85,247,0.2)";
+        }
+      } else {
+        const res = resources.find(r => r.id === event.subject_id);
+        const name = res ? res.name : `Resource #${event.subject_id}`;
+        if (event.action === 'ASSIGNED') {
+          title = "Resource dispatched"; subtitle = `${name} -> INC-${event.incident_id}`;
+          icon = Package; iconBg = "rgba(234,179,8,0.2)";
+        } else {
+          title = "Resource returned"; subtitle = `${name} from INC-${event.incident_id}`;
+          icon = Package; iconBg = "rgba(59,130,246,0.2)";
+        }
+      }
+      return { id: event.id || Math.random(), title, subtitle, icon, iconBg, time: timeAgo(event.timestamp) };
+    });
+
+  let totalResponseMs = 0;
+  let responseCount = 0;
+  incidents.forEach(inc => {
+    const incAssignments = assignments.filter(a => String(a.incident_id) === String(inc.id) && a.action === 'ASSIGNED');
+    if (incAssignments.length > 0) {
+      incAssignments.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      const diff = new Date(incAssignments[0].timestamp).getTime() - new Date(inc.created_at).getTime();
+      if (diff >= 0) { totalResponseMs += diff; responseCount++; }
+    }
+  });
+
+  const avgResponseMin = responseCount > 0 ? (totalResponseMs / responseCount / 60000).toFixed(1) : '--';
+  const assignRate = stats.total > 0 ? Math.round(((stats.total - stats.pending) / stats.total) * 100) : 0;
+  const resolutionRate = stats.total > 0 ? Math.round((stats.resolved / stats.total) * 100) : 0;
 
   return (
     <div className="animate-fade-in-up" style={{ paddingBottom: '3rem', paddingLeft: '1rem', paddingRight: '1rem' }}>
@@ -163,32 +218,26 @@ const AdminOverview = () => {
               </a>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <ActivityItem
-                icon={Activity} iconBg="rgba(99,102,241,0.2)"
-                title="New volunteer joined"
-                subtitle="Amit Sharma registered"
-                time="2m"
-              />
-              <ActivityItem
-                icon={Users} iconBg="rgba(34,197,94,0.2)"
-                title="Volunteer deployed"
-                subtitle="Riya Patel -> INC-001"
-                time="18m"
-              />
-              <ActivityItem
-                icon={Package} iconBg="rgba(234,179,8,0.2)"
-                title="Resources assigned"
-                subtitle="3 rescue boats dispatched"
-                time="1h"
-              />
+              {recentActivities.map((act) => (
+                <ActivityItem
+                  key={act.id}
+                  icon={act.icon} iconBg={act.iconBg}
+                  title={act.title}
+                  subtitle={act.subtitle}
+                  time={act.time}
+                />
+              ))}
+              {recentActivities.length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-4">No recent activity</p>
+              )}
             </div>
 
             {/* Quick stats */}
             <div className="grid grid-cols-2" style={{ gap: '0.75rem', marginTop: '1.25rem', paddingTop: '1.25rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
               {[
-                { label: 'Response Time', value: '8.4 min', color: '#4ade80' },
-                { label: 'Assign Rate', value: '94%', color: '#60a5fa' },
-                { label: 'Resolution Rate', value: '87%', color: '#a5b4fc' },
+                { label: 'Response Time', value: avgResponseMin !== '--' ? `${avgResponseMin} min` : '--', color: '#4ade80' },
+                { label: 'Assign Rate', value: `${assignRate}%`, color: '#60a5fa' },
+                { label: 'Resolution Rate', value: `${resolutionRate}%`, color: '#a5b4fc' },
                 { label: 'Volunteer Util.', value: `${stats.volunteers ? Math.round(((stats.volunteers - stats.volAvail) / stats.volunteers) * 100) : 0}%`, color: '#facc15' },
               ].map((m) => (
                 <div key={m.label} className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>

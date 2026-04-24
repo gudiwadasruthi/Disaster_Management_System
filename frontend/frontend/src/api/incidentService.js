@@ -109,22 +109,14 @@ export const getIncidentById = async (id) => {
   try {
     const assignmentsRes = await axiosInstance.get(`/assignments/incident/${id}`);
     const assignments = Array.isArray(assignmentsRes) ? assignmentsRes : (assignmentsRes?.data || []);
-    const activeVolAssignment = assignments
-      .filter(a => a.assignment_type === 'VOLUNTEER')
-      .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
     
-    if (activeVolAssignment && activeVolAssignment.action === 'ASSIGNED') {
-      const volsRes = await axiosInstance.get('/volunteers/', { params: { limit: 100 } });
-      const volunteers = Array.isArray(volsRes) ? volsRes : (volsRes.items || volsRes.data || []);
-      const volInfo = volunteers.find(v => String(v.id) === String(activeVolAssignment.subject_id));
-      if (volInfo) {
-        inc.assigned_volunteer = {
-          id: volInfo.id,
-          name: `${volInfo.first_name} ${volInfo.last_name}`,
-          skill: volInfo.skill
-        };
+    const volunteerIds = new Set();
+    for (const e of assignments) {
+      if (e?.assignment_type === 'VOLUNTEER' && e?.action === 'ASSIGNED') {
+        volunteerIds.add(e.subject_id);
       }
     }
+    inc.assigned_volunteers_count = volunteerIds.size;
   } catch (err) {
     console.error("Failed to load assignment details for incident", err);
   }

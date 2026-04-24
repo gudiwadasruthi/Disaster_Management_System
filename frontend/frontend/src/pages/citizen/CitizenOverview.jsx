@@ -24,6 +24,7 @@ const CitizenOverview = () => {
     queryKey: ['my-incidents', user?.id],
     queryFn: () => getMyIncidents(user?.id),
     enabled: !!user?.id,
+    refetchInterval: 10000,
   });
 
   const { data: alerts = [], isLoading: alertLoading } = useQuery({

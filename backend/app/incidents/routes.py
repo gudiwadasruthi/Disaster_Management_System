@@ -150,7 +150,24 @@ def list_my_incidents(
         query = query.filter(Incident.status == status)
 
     incidents = query.all()
-    return paginate(incidents, page, limit)
+    formatted_incidents = []
+    for incident in incidents:
+        inc_dict = {
+            "id": incident.id,
+            "title": incident.title,
+            "description": incident.description,
+            "latitude": incident.latitude,
+            "longitude": incident.longitude,
+            "type": getattr(incident, "type", None),
+            "severity": getattr(incident, "severity", None),
+            "status": incident.status.value if hasattr(incident.status, "value") else incident.status,
+            "created_at": incident.created_at,
+            "reported_by": incident.reported_by,
+            "reported_by_name": current_user.full_name,
+        }
+        formatted_incidents.append(inc_dict)
+
+    return paginate(formatted_incidents, page, limit)
 
 # Admin starts work on incident
 @router.put("/{incident_id}/start")
@@ -165,7 +182,15 @@ def start_incident(
         raise HTTPException(status_code=404, detail="Incident not found")
 
     try:
-        transition_incident(incident, IncidentStatus.IN_PROGRESS)
+        # Auto-verify REPORTED incidents so admin can activate in one click
+        if incident.status == IncidentStatus.REPORTED:
+            transition_incident(incident, IncidentStatus.VERIFIED)
+            transition_incident(incident, IncidentStatus.IN_PROGRESS)
+        elif incident.status in (IncidentStatus.RESOLVED, IncidentStatus.VERIFIED):
+            # Admin can reactivate resolved/verified incidents directly
+            incident.status = IncidentStatus.IN_PROGRESS
+        else:
+            transition_incident(incident, IncidentStatus.IN_PROGRESS)
         db.commit()
         return {"message": "Incident in progress"}
     except ValueError as e:

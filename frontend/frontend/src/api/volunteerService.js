@@ -147,43 +147,58 @@ export const getMyAssignments = async (volunteerId) => {
     const incidentsRes = await axiosInstance.get('/incidents/', { params: { limit: 100 } });
     const incidents = incidentsRes?.items || incidentsRes?.data || incidentsRes || [];
 
-    // Keep only the latest event per incident so UI doesn't show both ASSIGNED and RELEASED.
+    // Group events by incident to get both assigned and released timestamps
     const byIncident = new Map();
     for (const e of events) {
       const key = String(e?.incident_id ?? '');
       if (!key) continue;
-      const prev = byIncident.get(key);
-      const prevTs = prev?.timestamp ? new Date(prev.timestamp).getTime() : -1;
-      const nextTs = e?.timestamp ? new Date(e.timestamp).getTime() : -1;
-      if (!prev || nextTs >= prevTs) byIncident.set(key, e);
+      
+      const existing = byIncident.get(key) || { 
+        incident_id: key, 
+        events: []
+      };
+      existing.events.push(e);
+      byIncident.set(key, existing);
     }
 
     const latestEvents = Array.from(byIncident.values());
 
-    const augmentedEvents = latestEvents.map((event) => {
-      const inc = Array.isArray(incidents) ? incidents.find(i => String(i.id) === String(event.incident_id)) : null;
+    const augmentedEvents = latestEvents.map((group) => {
+      // Sort events newest first
+      group.events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      
+      const latestEvent = group.events[0];
+      const assignedEvent = group.events.find(e => e.action === 'ASSIGNED') || latestEvent;
+      const releasedEvent = group.events.find(e => e.action === 'RELEASED');
+      
+      const inc = Array.isArray(incidents) ? incidents.find(i => String(i.id) === String(group.incident_id)) : null;
       const latitude = inc?.latitude;
       const longitude = inc?.longitude;
       const coordAddress = (latitude != null && longitude != null)
         ? `(${Number(latitude).toFixed(6)}, ${Number(longitude).toFixed(6)})`
         : 'Location unavailable';
 
-      const status = event.action === 'ASSIGNED' ? 'in_progress' : 'completed';
-      const ts = event.timestamp ? new Date(event.timestamp).toISOString() : '';
+      const status = latestEvent.action === 'ASSIGNED' ? 'in_progress' : 'completed';
+      const ts = latestEvent.timestamp ? new Date(latestEvent.timestamp).toISOString() : '';
       return {
-        ...event,
-        id: event.id || `${event.incident_id}-${event.action}-${ts}`,
-        incident_title: inc ? inc.title : `Incident #${event.incident_id}`,
+        ...latestEvent,
+        id: latestEvent.id || `${group.incident_id}-${latestEvent.action}-${ts}`,
+        incident_title: inc ? inc.title : `Incident #${group.incident_id}`,
         incident_severity: inc?.severity || 'medium',
+        incident_created_at: inc?.created_at,
         status,
         location: coordAddress,
-        assigned_at: event.timestamp,
-        completed_at: event.action === 'RELEASED' ? event.timestamp : null,
+        assigned_at: assignedEvent?.timestamp || latestEvent.timestamp,
+        completed_at: releasedEvent?.timestamp || null,
       };
     });
 
-    // Sort newest first
-    augmentedEvents.sort((a, b) => new Date(b.assigned_at).getTime() - new Date(a.assigned_at).getTime());
+    // Sort newest first based on latest activity
+    augmentedEvents.sort((a, b) => {
+      const timeA = new Date(a.completed_at || a.assigned_at).getTime();
+      const timeB = new Date(b.completed_at || b.assigned_at).getTime();
+      return timeB - timeA;
+    });
     return augmentedEvents;
   } catch (error) {
     console.error('getMyAssignments error:', error);

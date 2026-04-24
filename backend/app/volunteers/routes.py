@@ -64,14 +64,10 @@ def assign_volunteer(
     if not volunteer:
         raise HTTPException(status_code=404, detail="Volunteer not found")
 
-    # Idempotency / recovery:
-    # - if already assigned to the same incident, don't fail
-    # - if running an older DB state (unavailable but no current_incident_id), allow setting it
+    # Block if volunteer is already assigned (same or different incident)
     if volunteer.is_available is False:
-        if volunteer.current_incident_id is None:
-            pass
-        elif volunteer.current_incident_id != incident_id:
-            raise HTTPException(status_code=404, detail="Volunteer not available")
+        if volunteer.current_incident_id is not None:
+            raise HTTPException(status_code=400, detail="Volunteer is already assigned to an active incident")
 
     resolved_volunteer_id = volunteer.id
 
@@ -131,11 +127,11 @@ def release_volunteer(
     volunteer.current_incident_id = None
     volunteer.assigned_at = None
 
-    # Update incident status to RESOLVED when volunteer completes it
+    # Update incident status to RESOLVED only when it's actively in progress
     from app.incidents.models import Incident
     from app.incidents.schemas import IncidentStatus
     incident = db.query(Incident).filter(Incident.id == incident_id).first()
-    if incident:
+    if incident and incident.status == IncidentStatus.IN_PROGRESS:
         incident.status = IncidentStatus.RESOLVED
 
     db.commit()

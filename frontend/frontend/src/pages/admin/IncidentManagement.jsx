@@ -35,59 +35,129 @@ const StatusBtn = ({ label, onClick, color, loading }) => (
 );
 
 /* ── Assign volunteer modal ────────────────────────────────────────────────── */
-const AssignModal = ({ incident, onClose, onAssign }) => {
-  const [selected, setSelected] = useState(null);
+const AssignModal = ({ incident, onClose, onAssign, alreadyAssignedIds = [] }) => {
+  const [selected, setSelected] = useState(new Set());
+  const [assigning, setAssigning] = useState(false);
   const { data, isLoading } = useQuery({
-    queryKey: ['volunteers-available'],
-    queryFn: () => getVolunteers({ available: true }),
+    queryKey: ['volunteers-all-for-assign'],
+    queryFn: () => getVolunteers({ limit: 100 }),
   });
-  const volunteers = data?.data || [];
+
+  const incidentCity = incident?.location?.address || '';
+
+  const volunteers = React.useMemo(() => {
+    const all = data?.data || [];
+    return all
+      .filter(v => !alreadyAssignedIds.includes(v.id)) // exclude already-assigned
+      .sort((a, b) => {
+        // Sort: same city first, then available, then alphabetical
+        const aCity = (a.city || '').toLowerCase();
+        const bCity = (b.city || '').toLowerCase();
+        const incCity = incidentCity.toLowerCase();
+        const aMatch = incCity.includes(aCity) || aCity.includes(incCity.split(',')[0]?.trim());
+        const bMatch = incCity.includes(bCity) || bCity.includes(incCity.split(',')[0]?.trim());
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        if (a.is_available && !b.is_available) return -1;
+        if (!a.is_available && b.is_available) return 1;
+        return 0;
+      });
+  }, [data, alreadyAssignedIds, incidentCity]);
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleAssign = async () => {
+    if (selected.size === 0) return;
+    setAssigning(true);
+    const vols = volunteers.filter(v => selected.has(v.id));
+    for (const vol of vols) {
+      await onAssign(incident.id, vol);
+    }
+    setAssigning(false);
+    onClose();
+  };
 
   return (
-    <Modal open onClose={onClose} title="Assign Volunteer" size="md">
+    <Modal open onClose={onClose} title="Assign Volunteers" size="md">
       <div className="mb-4">
         <p className="text-sm text-slate-400 mb-1">Incident: <span className="text-white font-semibold">{incident.title}</span></p>
-        <p className="text-xs text-slate-600">{incident.id}</p>
+        <p className="text-xs text-slate-500 flex items-center gap-1"><MapPin className="w-3 h-3" />{incident.location?.address}</p>
+        {alreadyAssignedIds.length > 0 && (
+          <p className="text-xs text-green-400 mt-1">✓ {alreadyAssignedIds.length} volunteer{alreadyAssignedIds.length > 1 ? 's' : ''} already assigned</p>
+        )}
+      </div>
+
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-xs text-slate-500">Select one or more volunteers</span>
+        {selected.size > 0 && (
+          <span className="text-xs font-semibold text-indigo-400">{selected.size} selected</span>
+        )}
       </div>
 
       {isLoading ? (
-        <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="skeleton h-12 rounded-xl" />)}</div>
+        <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="skeleton h-14 rounded-xl" />)}</div>
       ) : volunteers.length === 0 ? (
-        <p className="text-sm text-slate-500 text-center py-6">No available volunteers right now.</p>
+        <p className="text-sm text-slate-500 text-center py-6">No available volunteers to assign.</p>
       ) : (
         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-          {volunteers.map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setSelected(v)}
-              className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
-                selected?.id === v.id
-                  ? 'border-indigo-500/40 bg-indigo-500/10'
-                  : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]'
-              }`}
-            >
-              <div className="avatar avatar-sm text-white font-display shrink-0"
-                style={{ background: 'linear-gradient(135deg,#22c55e,#16a34a)', fontSize: '0.6rem' }}>
-                {v.first_name[0]}{v.last_name[0]}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-200">{v.first_name} {v.last_name}</p>
-                <p className="text-xs text-slate-500">{v.skill} · {v.city}</p>
-              </div>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20 shrink-0">Available</span>
-            </button>
-          ))}
+          {volunteers.map((v) => {
+            const isChecked = selected.has(v.id);
+            const vCity = (v.city || '').toLowerCase();
+            const incCity = incidentCity.toLowerCase();
+            const isNearby = incCity.includes(vCity) || vCity.includes(incCity.split(',')[0]?.trim().toLowerCase());
+            return (
+              <button
+                key={v.id}
+                onClick={() => toggleSelect(v.id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
+                  isChecked
+                    ? 'border-indigo-500/50 bg-indigo-500/15'
+                    : 'border-white/[0.07] bg-white/[0.02] hover:border-white/[0.14]'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border-2 transition-all ${
+                  isChecked ? 'bg-indigo-500 border-indigo-500' : 'border-slate-600'
+                }`}>
+                  {isChecked && <CheckCircle className="w-3 h-3 text-white" />}
+                </div>
+                <div className="avatar avatar-sm text-white font-display shrink-0 text-[0.6rem]"
+                  style={{ background: isNearby ? 'linear-gradient(135deg,#22c55e,#16a34a)' : 'linear-gradient(135deg,#6366f1,#4f46e5)' }}>
+                  {v.first_name?.[0]}{v.last_name?.[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-200">{v.first_name} {v.last_name}</p>
+                  <p className="text-xs text-slate-500">{v.skill} · {v.city}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  {isNearby && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Nearby</span>
+                  )}
+                  {v.is_available
+                    ? <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20">Available</span>
+                    : <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">Busy</span>
+                  }
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
       <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-white/[0.05]">
         <button onClick={onClose} className="btn btn-secondary btn-sm">Cancel</button>
         <button
-          onClick={() => selected && onAssign(incident.id, selected)}
-          disabled={!selected}
+          onClick={handleAssign}
+          disabled={selected.size === 0 || assigning}
           className="btn btn-primary btn-sm"
         >
-          <UserCheck className="w-3.5 h-3.5" /> Assign
+          <UserCheck className="w-3.5 h-3.5" />
+          {assigning ? 'Assigning…' : `Assign ${selected.size > 0 ? `(${selected.size})` : ''}`}
         </button>
       </div>
     </Modal>
@@ -158,12 +228,21 @@ const IncidentManagement = () => {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-incidents'] });
       qc.invalidateQueries({ queryKey: ['all-assignments'] });
+      qc.invalidateQueries({ queryKey: ['volunteers-all-for-assign'] });
       qc.invalidateQueries({ queryKey: ['all-volunteers'] });
-      setAssignTarget(null);
       toast.success('Volunteer assigned!');
     },
-    onError: () => toast.error('Assignment failed'),
+    onError: (err) => toast.error(err?.response?.data?.detail || 'Assignment failed'),
   });
+
+  // IDs of volunteers already assigned to the assignTarget incident
+  const alreadyAssignedIds = React.useMemo(() => {
+    if (!assignTarget) return [];
+    const incId = Number(assignTarget.id);
+    return (assignmentsData || [])
+      .filter(a => a.incident_id === incId && a.assignment_type === 'VOLUNTEER' && a.action === 'ASSIGNED')
+      .map(a => a.subject_id);
+  }, [assignTarget, assignmentsData]);
 
   const deleteMut = useMutation({
     mutationFn: (id) => deleteIncident(id),
@@ -324,6 +403,7 @@ const IncidentManagement = () => {
         <AssignModal
           incident={assignTarget}
           onClose={() => setAssignTarget(null)}
+          alreadyAssignedIds={alreadyAssignedIds}
           onAssign={(incidentId, volunteer) => assignMut.mutate({ incidentId, volunteer })}
         />
       )}

@@ -46,6 +46,32 @@ const VolunteerOverview = () => {
   const active    = assignments.filter((a) => a.status === 'in_progress').length;
   const unreadAlerts = alerts.filter((a) => !a.read).length;
 
+  let totalResponseMs = 0;
+  let responseCount = 0;
+  let totalAssignmentMs = 0;
+  let assignmentCount = 0;
+
+  assignments.forEach((a) => {
+    if (a.incident_created_at && a.assigned_at) {
+      const diff = new Date(a.assigned_at).getTime() - new Date(a.incident_created_at).getTime();
+      if (diff >= 0) {
+        totalResponseMs += diff;
+        responseCount++;
+      }
+    }
+    if (a.completed_at && a.assigned_at) {
+      const diff = new Date(a.completed_at).getTime() - new Date(a.assigned_at).getTime();
+      if (diff >= 0) {
+        totalAssignmentMs += diff;
+        assignmentCount++;
+      }
+    }
+  });
+
+  const avgResponseMin = responseCount > 0 ? (totalResponseMs / responseCount / 60000).toFixed(1) : '--';
+  const avgAssignmentHrs = assignmentCount > 0 ? (totalAssignmentMs / assignmentCount / 3600000).toFixed(1) : '--';
+  const completionRate = assignments.length > 0 ? Math.round((completed / assignments.length) * 100) : '--';
+
   return (
     <div className="animate-fade-in-up" style={{ paddingBottom: '3rem', paddingLeft: '1rem', paddingRight: '1rem' }}>
       {/* Header */}
@@ -184,24 +210,26 @@ const VolunteerOverview = () => {
               <h3 className="text-base font-bold text-white font-display">Recent Activity</h3>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div className="flex items-center gap-3 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-green-500/15 border border-green-500/20">
-                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+              {assignments.slice(0, 3).map((a) => (
+                <div key={`${a.id}-activity`} className="flex items-center gap-3 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                    a.status === 'completed' ? 'bg-green-500/15 border border-green-500/20' : 'bg-indigo-500/15 border border-indigo-500/25'
+                  }`}>
+                    {a.status === 'completed' ? <CheckCircle2 className="w-4 h-4 text-green-400" /> : <Activity className="w-4 h-4 text-indigo-400" />}
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-200">
+                      {a.status === 'completed' ? `Completed ${a.incident_title || 'incident'}` : `Accepted ${a.incident_title || 'incident'}`}
+                    </p>
+                    <p className="text-xs text-slate-500" style={{ marginTop: '0.25rem' }}>
+                      {timeAgo(a.status === 'completed' ? a.completed_at : a.assigned_at)}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-200">Completed incident response</p>
-                  <p className="text-xs text-slate-500" style={{ marginTop: '0.25rem' }}>2 hours ago</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 p-4 rounded-xl border border-white/[0.06] bg-white/[0.02]">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-indigo-500/15 border border-indigo-500/25">
-                  <Activity className="w-4 h-4 text-indigo-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-200">Accepted new incident</p>
-                  <p className="text-xs text-slate-500" style={{ marginTop: '0.25rem' }}>5 hours ago</p>
-                </div>
-              </div>
+              ))}
+              {assignments.length === 0 && (
+                <p className="text-xs text-slate-500 text-center py-4">No recent activity</p>
+              )}
             </div>
           </div>
         </div>
@@ -217,15 +245,15 @@ const VolunteerOverview = () => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               <div className="flex justify-between items-center">
                 <span className="text-xs text-slate-500">Response Time</span>
-                <span className="text-xs font-semibold text-green-400">4.2 min avg</span>
+                <span className="text-xs font-semibold text-green-400">{avgResponseMin !== '--' ? `${avgResponseMin} min avg` : '--'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs text-slate-500">Completion Rate</span>
-                <span className="text-xs font-semibold text-green-400">96%</span>
+                <span className="text-xs font-semibold text-green-400">{completionRate !== '--' ? `${completionRate}%` : '--'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs text-slate-500">Avg Assignment</span>
-                <span className="text-xs font-semibold text-green-400">2.8 hrs</span>
+                <span className="text-xs font-semibold text-green-400">{avgAssignmentHrs !== '--' ? `${avgAssignmentHrs} hrs` : '--'}</span>
               </div>
             </div>
           </div>

@@ -25,6 +25,7 @@ const IncidentDetail = () => {
   const { data: incident, isLoading } = useQuery({
     queryKey: ['incident', id],
     queryFn:  () => getIncidentById(id),
+    refetchInterval: 10000,
   });
 
   const [resolvedLocation, setResolvedLocation] = useState(null);
@@ -187,67 +188,25 @@ const IncidentDetail = () => {
         {/* Volunteer Assignment */}
         <div style={{ marginBottom: '3rem' }}>
           <h4 className="text-sm font-bold text-white font-display" style={{ marginBottom: '1.5rem' }}>Volunteer Assignment</h4>
-          {incident.assigned_volunteer ? (
-            <div className="card" style={{ padding: '2rem', background: 'rgba(34,197,94,0.08)', borderColor: 'rgba(34,197,94,0.25)' }}>
-              <div className="flex items-center gap-6">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" 
-                  style={{ 
-                    background: 'rgba(34,197,94,0.2)', 
-                    border: '1px solid rgba(34,197,94,0.3)'
-                  }}>
-                  <Truck className="w-8 h-8 text-green-400" />
-                </div>
-                <div style={{ paddingLeft: '1rem' }}>
-                  <div className="flex items-center gap-3 mb-16">
-                    <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse" />
-                    <p className="text-base font-bold text-green-400 uppercase tracking-wider" style={{ letterSpacing: '0.05em' }}>Volunteer Assigned</p>
-                  </div>
-                  <h3 className="text-2xl font-bold text-white font-display mb-12" style={{ letterSpacing: '0.01em' }}>
-                    {incident.assigned_volunteer.name}
-                  </h3>
-                  <div className="flex items-center gap-8">
-                    <div className="px-5 py-3 rounded-lg text-base font-semibold" 
-                      style={{ 
-                        background: 'rgba(34,197,94,0.2)', 
-                        color: '#4ade80',
-                        border: '1px solid rgba(34,197,94,0.3)',
-                        letterSpacing: '0.025em'
-                      }}>
-                      {incident.assigned_volunteer.skill}
-                    </div>
-                    <span className="text-base text-slate-500" style={{ letterSpacing: '0.01em', marginLeft: '1.5rem' }}>Expert Level</span>
-                  </div>
-                </div>
+          <div className="card" style={{ padding: '2rem', background: 'rgba(59,130,246,0.08)', borderColor: 'rgba(59,130,246,0.25)' }}>
+            <div className="flex items-center gap-6">
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" 
+                style={{ 
+                  background: 'rgba(59,130,246,0.2)', 
+                  border: '1px solid rgba(59,130,246,0.3)'
+                }}>
+                <User className="w-8 h-8 text-blue-400" />
+              </div>
+              <div style={{ paddingLeft: '1rem' }}>
+                <h3 className="text-3xl font-bold text-white font-display mb-2">
+                  {incident.assigned_volunteers_count || 0}
+                </h3>
+                <p className="text-sm text-slate-400" style={{ letterSpacing: '0.01em' }}>
+                  Volunteers have accepted this incident
+                </p>
               </div>
             </div>
-          ) : (
-            <div className="card" style={{ padding: '2rem', background: 'rgba(234,179,8,0.08)', borderColor: 'rgba(234,179,8,0.25)' }}>
-              <div className="flex items-center gap-6">
-                <div className="w-16 h-16 rounded-2xl flex items-center justify-center shrink-0" 
-                  style={{ 
-                    background: 'rgba(234,179,8,0.2)', 
-                    border: '1px solid rgba(234,179,8,0.3)'
-                  }}>
-                  <Activity className="w-8 h-8 text-yellow-400" />
-                </div>
-                <div style={{ paddingLeft: '1rem' }}>
-                  <div className="flex items-center gap-3 mb-10">
-                    <div className="w-2 h-2 rounded-full bg-yellow-400" />
-                    <p className="text-sm font-bold text-yellow-400 uppercase tracking-wider" style={{ letterSpacing: '0.05em' }}>Awaiting Assignment</p>
-                  </div>
-                  <h3 className="text-xl font-bold text-white font-display mb-8" style={{ letterSpacing: '0.01em' }}>
-                    Looking for Volunteer
-                  </h3>
-                  <div className="flex items-center gap-6">
-                    <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                    <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                    <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-                    <span className="text-sm text-slate-400" style={{ letterSpacing: '0.01em', marginLeft: '1rem' }}>A volunteer will be assigned shortly</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Images */}
